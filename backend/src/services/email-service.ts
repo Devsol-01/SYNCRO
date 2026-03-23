@@ -258,6 +258,79 @@ ${subscription.renewal_url ? `Manage Subscription: ${subscription.renewal_url}` 
 This is an automated reminder from Synchro.
     `.trim();
   }
+
+  /**
+   * Send a team invitation email
+   */
+  async sendInvitationEmail(
+    recipientEmail: string,
+    payload: { inviterEmail: string; teamName: string; role: string; acceptUrl: string; expiresAt: Date }
+  ): Promise<DeliveryResult> {
+    try {
+      return await withRetry(async () => {
+        if (!this.transporter) {
+          throw new NonRetryableError('Email transporter not configured');
+        }
+
+        const subject = `You've been invited to join ${payload.teamName} on Synchro`;
+        const expiresFormatted = payload.expiresAt.toLocaleDateString('en-US', {
+          year: 'numeric', month: 'long', day: 'numeric',
+        });
+
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Invitation</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+    <h1 style="color: white; margin: 0; font-size: 28px;">Team Invitation</h1>
+  </div>
+  <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+    <p><strong>${payload.inviterEmail}</strong> has invited you to join <strong>${payload.teamName}</strong> on Synchro as a <strong>${payload.role}</strong>.</p>
+    <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #667eea;">
+      <p style="margin: 0 0 8px 0;"><strong>Team:</strong> ${payload.teamName}</p>
+      <p style="margin: 0 0 8px 0;"><strong>Role:</strong> ${payload.role}</p>
+      <p style="margin: 0;"><strong>Expires:</strong> ${expiresFormatted}</p>
+    </div>
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="${payload.acceptUrl}" style="background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">
+        Accept Invitation
+      </a>
+    </div>
+    <p style="color: #666; font-size: 14px; margin-top: 30px;">
+      This invitation expires on ${expiresFormatted}. If you did not expect this invitation, you can safely ignore this email.
+    </p>
+  </div>
+</body>
+</html>`.trim();
+
+        const text = `${payload.inviterEmail} has invited you to join ${payload.teamName} on Synchro as a ${payload.role}.\n\nAccept invitation: ${payload.acceptUrl}\n\nThis invitation expires on ${expiresFormatted}.`;
+
+        const info = await this.transporter.sendMail({
+          from: this.fromEmail,
+          to: recipientEmail,
+          subject,
+          html,
+          text,
+        });
+
+        logger.info(`Invitation email sent to ${recipientEmail}`, { messageId: info.messageId });
+
+        return {
+          success: true,
+          metadata: { messageId: info.messageId, accepted: info.accepted, rejected: info.rejected },
+        };
+      }, { maxAttempts: 3 });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to send invitation email to ${recipientEmail}:`, errorMessage);
+      return { success: false, error: errorMessage, metadata: { retryable: this.isRetryableError(error) } };
+    }
+  }
 }
 
 export const emailService = new EmailService();
