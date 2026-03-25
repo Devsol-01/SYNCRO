@@ -15,6 +15,7 @@ import simulationRoutes from './routes/simulation';
 import merchantRoutes from './routes/merchants';
 import teamRoutes from './routes/team';
 import auditRoutes from './routes/audit';
+import webhookRoutes from './routes/webhooks';
 import { monitoringService } from './services/monitoring-service';
 import { healthService } from './services/health-service';
 import { eventListener } from './services/event-listener';
@@ -62,6 +63,7 @@ app.use('/api/simulation', simulationRoutes);
 app.use('/api/merchants', merchantRoutes);
 app.use('/api/team', teamRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // API Routes (Public/Standard)
 app.get('/api/reminders/status', (req, res) => {

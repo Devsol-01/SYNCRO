@@ -1,6 +1,7 @@
 import { supabase } from "../config/database";
 import { blockchainService } from "./blockchain-service";
 import { renewalCooldownService } from "./renewal-cooldown-service";
+import { webhookService } from "./webhook-service";
 import logger from "../config/logger";
 import { DatabaseTransaction } from "../utils/transaction";
 import type {

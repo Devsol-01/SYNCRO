@@ -3,6 +3,7 @@ import { supabase } from '../config/database';
 import { emailService } from './email-service';
 import { pushService, PushSubscription } from './push-service';
 import { blockchainService } from './blockchain-service';
+import { webhookService } from './webhook-service';
 import {
   ReminderSchedule,
   Subscription,
@@ -88,7 +89,7 @@ export class ReminderEngine {
         return;
       }
 
-      const renewalDate = subscription.active_until || new Date().toISOString();
+      const renewalDate = subscription.next_billing_date || new Date().toISOString();
       const payload: NotificationPayload = {
         title: `${subscription.name} Renewal Reminder`,
         body: `${subscription.name} will renew in ${reminder.days_before} day${reminder.days_before > 1 ? 's' : ''}`,
@@ -97,6 +98,15 @@ export class ReminderEngine {
         daysBefore: reminder.days_before,
         renewalDate,
       };
+
+      // Dispatch subscription.renewal_due webhook
+      webhookService.dispatchEvent(reminder.user_id, 'subscription.renewal_due', {
+        subscription_id: subscription.id,
+        days_before: reminder.days_before,
+        renewal_date: renewalDate
+      }).catch(err => {
+        logger.error('Failed to dispatch subscription.renewal_due webhook:', err);
+      });
 
       const preferences = await userPreferenceService.getPreferences(reminder.user_id);
       const deliveryChannels = preferences.notification_channels;
@@ -123,6 +133,7 @@ export class ReminderEngine {
           emailResult.success ? 'sent' : 'failed',
           emailResult.error,
           emailResult.metadata,
+          'email',
         );
       }
 
@@ -148,6 +159,7 @@ export class ReminderEngine {
             pushResult.success ? 'sent' : 'failed',
             pushResult.error,
             pushResult.metadata,
+            'push',
           );
 
           // If the push subscription is gone (410/404), clean it up
@@ -255,7 +267,7 @@ export class ReminderEngine {
         return;
       }
 
-      const renewalDate = subscription.active_until || new Date().toISOString();
+      const renewalDate = subscription.next_billing_date || new Date().toISOString();
       const payload: NotificationPayload = {
         title: `${subscription.name} Renewal Reminder`,
         body: `${subscription.name} will renew in ${reminder.days_before} day${reminder.days_before > 1 ? 's' : ''}`,
@@ -339,8 +351,8 @@ export class ReminderEngine {
         .from('subscriptions')
         .select('*')
         .eq('status', 'active')
-        .not('active_until', 'is', null)
-        .gt('active_until', new Date().toISOString());
+        .not('next_billing_date', 'is', null)
+        .gt('next_billing_date', new Date().toISOString());
 
       if (error) {
         logger.error('Failed to fetch subscriptions:', error);
@@ -355,12 +367,12 @@ export class ReminderEngine {
       logger.info(`Found ${subscriptions.length} subscriptions to schedule reminders for`);
 
       for (const subscription of subscriptions) {
-        if (!subscription.active_until) continue;
+        if (!subscription.next_billing_date) continue;
 
         const preferences = await userPreferenceService.getPreferences(subscription.user_id);
         const userDaysBefore = preferences.reminder_timing;
 
-        const renewalDate = new Date(subscription.active_until);
+        const renewalDate = new Date(subscription.next_billing_date);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
@@ -551,6 +563,7 @@ export class ReminderEngine {
     status: 'sent' | 'failed' | 'retrying',
     errorMessage: string | undefined,
     metadata: Record<string, any> | undefined,
+    channel: 'email' | 'push',
   ): Promise<void> {
     const updateData: any = {
       status,
@@ -578,6 +591,25 @@ export class ReminderEngine {
       .eq('id', deliveryId);
 
     if (error) throw error;
+
+    // Dispatch reminder.sent webhook if status is sent
+    if (status === 'sent') {
+      const { data: delivery } = await supabase
+        .from('notification_deliveries')
+        .select('user_id, reminder_schedule_id')
+        .eq('id', deliveryId)
+        .single();
+
+      if (delivery) {
+        webhookService.dispatchEvent(delivery.user_id, 'reminder.sent', {
+          delivery_id: deliveryId,
+          reminder_schedule_id: delivery.reminder_schedule_id,
+          channel
+        }).catch(err => {
+          logger.error('Failed to dispatch reminder.sent webhook:', err);
+        });
+      }
+    }
   }
 
   private async markDeliveryAsFailed(

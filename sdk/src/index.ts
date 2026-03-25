@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance } from "axios";
 import { EventEmitter } from "node:events";
+import * as crypto from "node:crypto";
 import type {
   GiftCardEvent,
   GiftCardEventType,
@@ -416,6 +417,43 @@ export class SyncroSDK extends EventEmitter {
       return null;
     }
     return null;
+  }
+
+  /**
+   * Verify a webhook signature
+   * @param payload The raw request body as a string
+   * @param signature The X-Syncro-Signature header value
+   * @param secret The webhook secret (whsec_...)
+   * @returns boolean indicating if the signature is valid
+   */
+  static verifyWebhookSignature(payload: string, signature: string, secret: string): boolean {
+    if (!signature || !secret || !payload) return false;
+
+    const [timestampPart, signaturePart] = signature.split(',');
+    if (!timestampPart || !signaturePart) return false;
+
+    const timestamp = timestampPart.split('=')[1];
+    const receivedSignature = signaturePart.split('=')[1];
+
+    if (!timestamp || !receivedSignature) return false;
+
+    // Verify timestamp is within 5 minutes (300 seconds)
+    const now = Math.floor(Date.now() / 1000);
+    const ts = parseInt(timestamp, 10);
+    if (isNaN(ts) || Math.abs(now - ts) > 300) {
+      return false;
+    }
+
+    const signedPayload = `${timestamp}.${payload}`;
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(signedPayload)
+      .digest('hex');
+
+    return crypto.timingSafeEqual(
+      Buffer.from(receivedSignature, 'hex'),
+      Buffer.from(expectedSignature, 'hex')
+    );
   }
 }
 
