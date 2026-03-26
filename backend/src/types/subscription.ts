@@ -6,8 +6,8 @@ export interface Subscription {
   name: string;
   provider: string;
   price: number;
-  billing_cycle: 'monthly' | 'yearly' | 'quarterly';
-  status: 'active' | 'cancelled' | 'paused' | 'trial' | 'expired';
+  billing_cycle: "monthly" | "yearly" | "quarterly";
+  status: "active" | "cancelled" | "paused" | "trial" | "expired";
   next_billing_date: string | null;
   category: string | null;
   logo_url: string | null;
@@ -24,6 +24,10 @@ export interface Subscription {
   blockchain_activated_at?: number | null;
   blockchain_last_renewed_at?: number | null;
   blockchain_canceled_at?: number | null;
+  // In Subscription interface — add after expired_at
+  paused_at: string | null;
+  resume_at: string | null;
+  pause_reason: string | null;
 }
 
 export interface SubscriptionCreateInput {
@@ -31,8 +35,8 @@ export interface SubscriptionCreateInput {
   provider?: string;
   merchant_id?: string;
   price: number;
-  billing_cycle: 'monthly' | 'yearly' | 'quarterly';
-  status?: 'active' | 'cancelled' | 'paused' | 'trial' | 'expired';
+  billing_cycle: "monthly" | "yearly" | "quarterly";
+  status?: "active" | "cancelled" | "paused" | "trial" | "expired";
   next_billing_date?: string;
   category?: string;
   logo_url?: string;
@@ -49,8 +53,30 @@ export interface SubscriptionUpdateInput {
   provider?: string;
   merchant_id?: string;
   price?: number;
-  billing_cycle?: 'monthly' | 'yearly' | 'quarterly';
-  status?: 'active' | 'cancelled' | 'paused' | 'trial' | 'expired';
+  billing_cycle?: "monthly" | "yearly" | "quarterly";
+  status?: "active" | "cancelled" | "paused" | "trial" | "expired";
+  next_billing_date?: string;
+  category?: string;
+  logo_url?: string;
+  website_url?: string;
+  renewal_url?: string;
+  notes?: string;
+  tags?: string[];
+  // In Subscription interface — add after expired_at
+  paused_at?: string | null;
+  resume_at?: string | null;
+  pause_reason?: string | null;
+}
+
+/** Allowlist of fields a user is permitted to update.
+ *  Does NOT include id, user_id, created_at — those can never be user-modified. */
+export interface SubscriptionUpdateAllowlist {
+  name?: string;
+  provider?: string;
+  merchant_id?: string;
+  price?: number;
+  billing_cycle?: Subscription["billing_cycle"];
+  status?: Subscription["status"];
   next_billing_date?: string;
   category?: string;
   logo_url?: string;
@@ -59,4 +85,16 @@ export interface SubscriptionUpdateInput {
   notes?: string;
   visibility?: 'private' | 'team';
   tags?: string[];
+}
+
+export interface ListSubscriptionsOptions {
+  status?: Subscription["status"];
+  category?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListSubscriptionsResult {
+  subscriptions: Subscription[];
+  total: number;
 }

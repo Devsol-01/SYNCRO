@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import logger from './config/logger';
+import { requestIdMiddleware } from './middleware/requestContext';
+import { requestLoggerMiddleware } from './middleware/requestLogger';
 import { schedulerService } from './services/scheduler';
 import { reminderEngine } from './services/reminder-engine';
 import subscriptionRoutes from './routes/subscriptions';
@@ -12,10 +14,12 @@ import riskScoreRoutes from './routes/risk-score';
 import simulationRoutes from './routes/simulation';
 import merchantRoutes from './routes/merchants';
 import teamRoutes from './routes/team';
+import auditRoutes from './routes/audit';
 import { monitoringService } from './services/monitoring-service';
 import { healthService } from './services/health-service';
 import { eventListener } from './services/event-listener';
 import { expiryService } from './services/expiry-service';
+import { scheduleAutoResume } from './jobs/auto-resume';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -26,7 +30,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', FRONTEND_URL);
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key, If-Match');
 
   if (req.method === 'OPTIONS') {
@@ -39,6 +43,11 @@ app.use((req, res, next) => {
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Request tracing — must come before routes so every log line carries requestId
+app.use(requestIdMiddleware);
+app.use(requestLoggerMiddleware);
+
 
 import { adminAuth } from './middleware/admin';
 
@@ -53,6 +62,7 @@ app.use('/api/risk-score', riskScoreRoutes);
 app.use('/api/simulation', simulationRoutes);
 app.use('/api/merchants', merchantRoutes);
 app.use('/api/team', teamRoutes);
+app.use('/api/audit', auditRoutes);
 
 // API Routes (Public/Standard)
 app.get('/api/reminders/status', (req, res) => {
@@ -181,7 +191,11 @@ const server = app.listen(PORT, () => {
   eventListener.start().catch(err => {
     logger.error('Failed to start event listener:', err);
   });
+
+  scheduleAutoResume();
 });
+
+
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
