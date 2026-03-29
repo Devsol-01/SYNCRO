@@ -25,7 +25,6 @@ export interface Subscription {
   blockchain_activated_at?: number | null;
   blockchain_last_renewed_at?: number | null;
   blockchain_canceled_at?: number | null;
-  // In Subscription interface — add after expired_at
   paused_at: string | null;
   resume_at: string | null;
   pause_reason: string | null;
@@ -65,7 +64,6 @@ export interface SubscriptionUpdateInput {
   renewal_url?: string;
   notes?: string;
   tags?: string[];
-  // In Subscription interface — add after expired_at
   paused_at?: string | null;
   resume_at?: string | null;
   pause_reason?: string | null;
@@ -96,11 +94,14 @@ export interface ListSubscriptionsOptions {
   category?: string;
   limit?: number;
   offset?: number;
+  cursor?: string;
 }
 
 export interface ListSubscriptionsResult {
   subscriptions: Subscription[];
   total: number;
+  hasMore: boolean;
+  nextCursor: string | null;
 }
 
 // ── Notification Preference Types ────────────────────────────────────────────

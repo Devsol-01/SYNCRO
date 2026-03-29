@@ -243,6 +243,7 @@ export class SubscriptionService {
     });
   }
 
+  // Delete subscription with blockchain sync
   /**
    * Delete subscription with blockchain sync
    */
@@ -284,6 +285,7 @@ export class SubscriptionService {
           blockchainResult = await blockchainService.syncSubscription(
             userId,
             subscriptionId,
+            "cancel",
             "delete",
             subscription,
           );
@@ -337,7 +339,163 @@ export class SubscriptionService {
     reason?: string,
   ): Promise<SubscriptionSyncResult> {
     return await DatabaseTransaction.execute(async (client) => {
+      // 1. Fetch and verify ownership
+      const { data: subscription, error: fetchError } = await client
+        .from("subscriptions")
+        .select("*")
+        .eq("id", subscriptionId)
+        .eq("user_id", userId)
+        .single();
+
+      if (fetchError || !subscription) {
+        throw new Error("Subscription not found or access denied");
+      }
+
+      // 2. Guard: can only pause an active subscription
+      if (subscription.status === "paused") {
+        throw new Error("Subscription is already paused");
+      }
+      if (subscription.status === "cancelled") {
+        throw new Error("Cannot pause a cancelled subscription");
+      }
+
+      // 3. Write to DB
+      const { data: updatedSubscription, error: updateError } = await client
+        .from("subscriptions")
+        .update({
+          status: "paused",
+          paused_at: new Date().toISOString(),
+          resume_at: resumeAt ?? null,
+          pause_reason: reason ?? null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", subscriptionId)
+        .eq("user_id", userId)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw new Error(`Pause failed: ${updateError.message}`);
+      }
+
+      // 4. Sync to blockchain (non-fatal if it fails)
+      let blockchainResult;
+      let syncStatus: "synced" | "partial" | "failed" = "synced";
+
       try {
+        blockchainResult = await blockchainService.syncSubscription(
+          userId,
+          subscriptionId,
+          "pause",         // blockchain service will call pause() on the contract
+          updatedSubscription,
+        );
+
+        if (!blockchainResult.success) {
+          syncStatus = "partial";
+          logger.warn("Blockchain sync failed for subscription pause", {
+            subscriptionId,
+            error: blockchainResult.error,
+          });
+        }
+      } catch (blockchainError) {
+        syncStatus = "partial";
+        logger.error("Blockchain sync error (non-fatal):", blockchainError);
+        blockchainResult = {
+          success: false,
+          error: blockchainError instanceof Error
+            ? blockchainError.message
+            : String(blockchainError),
+        };
+      }
+
+      return {
+        subscription: updatedSubscription,
+        blockchainResult,
+        syncStatus,
+      };
+    });
+  }
+
+  async resumeSubscription(
+    userId: string,
+    subscriptionId: string,
+  ): Promise<SubscriptionSyncResult> {
+    return await DatabaseTransaction.execute(async (client) => {
+      // 1. Fetch and verify ownership
+      const { data: subscription, error: fetchError } = await client
+        .from("subscriptions")
+        .select("*")
+        .eq("id", subscriptionId)
+        .eq("user_id", userId)
+        .single();
+
+      if (fetchError || !subscription) {
+        throw new Error("Subscription not found or access denied");
+      }
+
+      // 2. Guard: can only resume a paused subscription
+      if (subscription.status !== "paused") {
+        throw new Error("Subscription is not paused");
+      }
+
+      // 3. Write to DB — clear all pause fields, restore active
+      const { data: updatedSubscription, error: updateError } = await client
+        .from("subscriptions")
+        .update({
+          status: "active",
+          paused_at: null,
+          resume_at: null,
+          pause_reason: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", subscriptionId)
+        .eq("user_id", userId)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw new Error(`Resume failed: ${updateError.message}`);
+      }
+
+      // 4. Sync to blockchain (non-fatal if it fails)
+      let blockchainResult;
+      let syncStatus: "synced" | "partial" | "failed" = "synced";
+
+      try {
+        blockchainResult = await blockchainService.syncSubscription(
+          userId,
+          subscriptionId,
+          "unpause",       // blockchain service will call unpause() on the contract
+          updatedSubscription,
+        );
+
+        if (!blockchainResult.success) {
+          syncStatus = "partial";
+          logger.warn("Blockchain sync failed for subscription resume", {
+            subscriptionId,
+            error: blockchainResult.error,
+          });
+        }
+      } catch (blockchainError) {
+        syncStatus = "partial";
+        logger.error("Blockchain sync error (non-fatal):", blockchainError);
+        blockchainResult = {
+          success: false,
+          error: blockchainError instanceof Error
+            ? blockchainError.message
+            : String(blockchainError),
+        };
+      }
+
+      return {
+        subscription: updatedSubscription,
+        blockchainResult,
+        syncStatus,
+      };
+    });
+  }
+
+  // Get subscription by ID (with ownership check)
         // 1. Fetch and verify ownership
         const { data: subscription, error: fetchError } = await client
           .from("subscriptions")
@@ -345,19 +503,13 @@ export class SubscriptionService {
           .eq("id", subscriptionId)
           .eq("user_id", userId)
           .single();
-
         if (fetchError || !subscription) {
           throw new Error("Subscription not found or access denied");
-        }
-
         // 2. Guard: can only pause an active subscription
         if (subscription.status === "paused") {
           throw new Error("Subscription is already paused");
-        }
         if (subscription.status === "cancelled") {
           throw new Error("Cannot pause a cancelled subscription");
-        }
-
         // 3. Write to DB
         const { data: updatedSubscription, error: updateError } = await client
           .from("subscriptions")
@@ -372,23 +524,17 @@ export class SubscriptionService {
           .eq("user_id", userId)
           .select()
           .single();
-
         if (updateError) {
           throw new Error(`Pause failed: ${updateError.message}`);
-        }
-
         // 4. Sync to blockchain (non-fatal if it fails)
         let blockchainResult;
         let syncStatus: "synced" | "partial" | "failed" = "synced";
-
         try {
           blockchainResult = await blockchainService.syncSubscription(
             userId,
-            subscriptionId,
             "pause",         // blockchain service will call pause() on the contract
             updatedSubscription,
           );
-
           if (!blockchainResult.success) {
             syncStatus = "partial";
             logger.warn("Blockchain sync failed for subscription pause", {
@@ -397,7 +543,6 @@ export class SubscriptionService {
             });
           }
         } catch (blockchainError) {
-          syncStatus = "partial";
           logger.error("Blockchain sync error (non-fatal):", blockchainError);
           blockchainResult = {
             success: false,
@@ -405,13 +550,10 @@ export class SubscriptionService {
               ? blockchainError.message
               : String(blockchainError),
           };
-        }
-
         return {
           subscription: updatedSubscription,
           blockchainResult,
           syncStatus,
-        };
       } catch (error) {
         logger.error("Pause failed:", error);
         throw error;
@@ -431,16 +573,11 @@ export class SubscriptionService {
           .eq("id", subscriptionId)
           .eq("user_id", userId)
           .single();
-
         if (fetchError || !subscription) {
           throw new Error("Subscription not found or access denied");
-        }
-
         // 2. Guard: can only resume a paused subscription
         if (subscription.status !== "paused") {
           throw new Error("Subscription is not paused");
-        }
-
         // 3. Write to DB — clear all pause fields, restore active
         const { data: updatedSubscription, error: updateError } = await client
           .from("subscriptions")
@@ -455,23 +592,17 @@ export class SubscriptionService {
           .eq("user_id", userId)
           .select()
           .single();
-
         if (updateError) {
           throw new Error(`Resume failed: ${updateError.message}`);
-        }
-
         // 4. Sync to blockchain (non-fatal if it fails)
         let blockchainResult;
         let syncStatus: "synced" | "partial" | "failed" = "synced";
-
         try {
           blockchainResult = await blockchainService.syncSubscription(
             userId,
-            subscriptionId,
             "unpause",       // blockchain service will call unpause() on the contract
             updatedSubscription,
           );
-
           if (!blockchainResult.success) {
             syncStatus = "partial";
             logger.warn("Blockchain sync failed for subscription resume", {
@@ -480,7 +611,6 @@ export class SubscriptionService {
             });
           }
         } catch (blockchainError) {
-          syncStatus = "partial";
           logger.error("Blockchain sync error (non-fatal):", blockchainError);
           blockchainResult = {
             success: false,
@@ -488,13 +618,10 @@ export class SubscriptionService {
               ? blockchainError.message
               : String(blockchainError),
           };
-        }
-
         return {
           subscription: updatedSubscription,
           blockchainResult,
           syncStatus,
-        };
       } catch (error) {
         logger.error("Resume failed:", error);
         throw error;
@@ -518,6 +645,7 @@ export class SubscriptionService {
 
     return subscription;
 
+  // List user's subscriptions with cursor-based pagination
   /**
    * List user's subscriptions with optional filtering
    */
@@ -525,11 +653,14 @@ export class SubscriptionService {
     userId: string,
     options: ListSubscriptionsOptions = {},
   ): Promise<ListSubscriptionsResult> {
+    const limit = Math.min(options.limit ?? 20, 100);
+
     let query = supabase
       .from("subscriptions")
       .select("*", { count: "exact" })
       .eq("user_id", userId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(limit + 1);
 
     if (options.status) {
       query = query.eq("status", options.status);
@@ -539,18 +670,21 @@ export class SubscriptionService {
       query = query.eq("category", options.category);
     }
 
-    if (options.limit) {
-      query = query.limit(options.limit);
+    if (options.cursor) {
+      try {
+        const decoded = JSON.parse(
+          Buffer.from(options.cursor, "base64").toString("utf-8"),
+        );
+        if (!decoded.created_at) {
+          throw new Error("Invalid cursor: missing created_at");
+        }
+        query = query.lt("created_at", decoded.created_at);
+      } catch {
+        throw new Error("Invalid pagination cursor");
+      }
     }
 
-    if (options.offset) {
-      query = query.range(
-        options.offset,
-        options.offset + (options.limit || 10) - 1,
-      );
-    }
-
-    const { data: subscriptions, error, count } = await query;
+    const { data: rows, error, count } = await query;
 
     if (error) {
       throw new Error(`Failed to fetch subscriptions: ${error.message}`);
@@ -576,6 +710,21 @@ export class SubscriptionService {
     return {
       subscriptions: enhancedSubscriptions,
       total: count || 0,
+    const hasMore = (rows?.length ?? 0) > limit;
+    const subscriptions = hasMore ? rows!.slice(0, limit) : (rows ?? []);
+    // Build next cursor from the last item in the page
+    const nextCursor =
+      hasMore && subscriptions.length > 0
+        ? Buffer.from(
+          JSON.stringify({
+            created_at: subscriptions[subscriptions.length - 1].created_at,
+          }),
+        ).toString("base64")
+        : null;
+      subscriptions,
+      total: count ?? 0,
+      hasMore,
+      nextCursor,
     };
 
   /**

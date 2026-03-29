@@ -7,6 +7,52 @@ import {
   validateBulkSubscriptionOwnership,
 } from "../middleware/ownership";
 import logger from "../config/logger";
+import { Router, Response } from 'express';
+import { z } from 'zod';
+import { subscriptionService } from '../services/subscription-service';
+import { giftCardService } from '../services/gift-card-service';
+import { idempotencyService } from '../services/idempotency';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { validateSubscriptionOwnership, validateBulkSubscriptionOwnership } from '../middleware/ownership';
+import logger from '../config/logger';
+import type { Subscription } from '../types/subscription';
+
+const resolveParam = (p: string | string[]): string =>
+  Array.isArray(p) ? p[0] : p;
+
+// Zod schema for URL fields — only http/https allowed
+const safeUrlSchema = z
+  .string()
+  .url('Must be a valid URL')
+  .refine(
+    (val) => {
+      try {
+        const { protocol } = new URL(val);
+        return protocol === 'http:' || protocol === 'https:';
+      } catch {
+        return false;
+      }
+    },
+    { message: 'URL must use http or https protocol' }
+  );
+
+// Validation schema for subscription create input
+const createSubscriptionSchema = z.object({
+  name: z.string().min(1),
+  price: z.number(),
+  billing_cycle: z.enum(['monthly', 'yearly', 'quarterly']),
+  renewal_url: safeUrlSchema.optional(),
+  website_url: safeUrlSchema.optional(),
+  logo_url: safeUrlSchema.optional(),
+});
+
+// Validation schema for subscription update input
+const updateSubscriptionSchema = z.object({
+  renewal_url: safeUrlSchema.optional(),
+  website_url: safeUrlSchema.optional(),
+  logo_url: safeUrlSchema.optional(),
+}).passthrough();
+
 
 const router = Router();
 
@@ -64,6 +110,32 @@ router.get("/", async (req: AuthenticatedRequest, res: Response) => {
       category: category as string | undefined,
       limit: limit ? parseInt(limit as string) : undefined,
       offset: offset ? parseInt(offset as string) : undefined,
+ * GET /api/subscriptions
+ * List user's subscriptions with cursor-based pagination and optional filtering.
+ *
+ * Query params:
+ *   limit    - max items per page (1–100, default 20)
+ *   cursor   - opaque base64 cursor returned by previous response
+ *   status   - filter by subscription status
+ *   category - filter by category
+ *
+ * Response pagination object:
+ *   total      - total count across all pages (ignores cursor / limit)
+ *   limit      - effective page size used
+ *   hasMore    - whether another page exists after this one
+ *   nextCursor - cursor to pass on the next request (null when on last page)
+    const rawLimit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    // Reject non-numeric or out-of-range limit values early
+    if (rawLimit !== undefined && (isNaN(rawLimit) || rawLimit < 1)) {
+      return res.status(400).json({
+        success: false,
+        error: "limit must be a positive integer",
+      });
+    }
+      status: req.query.status as Subscription['status'] | undefined,
+      category: req.query.category as string | undefined,
+      limit: rawLimit,
+      cursor: req.query.cursor as string | undefined,
     });
 
     res.json({
@@ -73,10 +145,22 @@ router.get("/", async (req: AuthenticatedRequest, res: Response) => {
         total: result.total,
         limit: limit ? parseInt(limit as string) : undefined,
         offset: offset ? parseInt(offset as string) : undefined,
+        limit: Math.min(rawLimit ?? 20, 100),
+        hasMore: result.hasMore,
+        nextCursor: result.nextCursor ?? null,
       },
     });
   } catch (error) {
     logger.error("List subscriptions error:", error);
+
+    // Surface cursor decode errors as 400 rather than 500
+    if (error instanceof Error && error.message.includes("cursor")) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
       error:
@@ -120,6 +204,7 @@ router.get("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReque
     const subscription = await subscriptionService.getSubscription(
       req.user!.id,
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      resolveParam(req.params.id)
     );
 
     res.json({
@@ -383,6 +468,7 @@ router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedReq
     const result = await subscriptionService.updateSubscription(
       req.user!.id,
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+      resolveParam(req.params.id),
       req.body,
       expectedVersion ? parseInt(expectedVersion) : undefined,
     );
@@ -456,6 +542,7 @@ router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRe
     const result = await subscriptionService.cancelSubscription(
       req.user!.id,
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      resolveParam(req.params.id)
     );
 
     const responseBody = {
@@ -525,6 +612,7 @@ router.delete("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRe
 router.post('/:id/attach-gift-card', validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const subscriptionId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const subscriptionId = resolveParam(req.params.id);
     if (!subscriptionId) {
       return res.status(400).json({ success: false, error: 'Subscription ID required' });
     }
@@ -606,6 +694,7 @@ router.post("/:id/retry-sync", validateSubscriptionOwnership, async (req: Authen
     const result = await subscriptionService.retryBlockchainSync(
       req.user!.id,
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+      resolveParam(req.params.id)
     );
 
     res.json({
@@ -670,6 +759,7 @@ router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: Au
     const cooldownStatus = await subscriptionService.checkRenewalCooldown(
       req.params.id,
      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+      resolveParam(req.params.id),
     );
 
     res.json({
@@ -692,6 +782,8 @@ router.get("/:id/cooldown-status", validateSubscriptionOwnership, async (req: Au
 function extractWaitTime(message: string): number {
   const match = message.match(/wait (\d+) seconds/);
   return match ? parseInt(match[1], 10) : 60;
+import * as bip39 from 'bip39';
+ * Generates a standard BIP39 12-word mnemonic phrase.
 export function generateMnemonic(): string {
   return bip39.generateMnemonic(128);
 }
@@ -884,6 +976,12 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
     const result = await subscriptionService.cancelSubscription(
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
     const responseBody = {
+
+      req.user!.id,
+      resolveParam(req.params.id),
+    );
+
+      success: true,
       data: result.subscription,
       blockchain: {
         synced: result.syncStatus === "synced",
@@ -902,6 +1000,8 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
       );
     }
     res.status(statusCode).json(responseBody);
+
+  } catch (error) {
     logger.error("Cancel subscription error:", error);
     const statusCode =
       error instanceof Error && error.message.includes("not found")
@@ -925,6 +1025,10 @@ export function validateMnemonic(mnemonic: string): boolean {
  * Create new subscription with idempotency support
  */
 router.post("/", async (req: AuthenticatedRequest, res: Response) => {
+ * POST /api/subscriptions/:id/pause
+ * Pause subscription — skips reminders, risk scoring, and projected spend
+ * Body: { resumeAt?: string (ISO date), reason?: string }
+router.post("/:id/pause", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const idempotencyKey = req.headers["idempotency-key"] as string;
     const requestHash = idempotencyService.hashRequest(req.body);
@@ -963,6 +1067,20 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
       req.user!.id,
       req.body,
       idempotencyKey,
+    const pauseSchema = z.object({
+      resumeAt: z.string().datetime({ offset: true }).optional(),
+      reason: z.string().max(500).optional(),
+    });
+    const validation = pauseSchema.safeParse(req.body);
+    if (!validation.success) {
+        error: validation.error.errors.map((e) => e.message).join(", "),
+    const { resumeAt, reason } = validation.data;
+    if (resumeAt && new Date(resumeAt) <= new Date()) {
+        error: "resumeAt must be a future date",
+    const result = await subscriptionService.pauseSubscription(
+      resolveParam(req.params.id),
+      resumeAt,
+      reason,
     );
 
     const responseBody = {
@@ -978,6 +1096,7 @@ router.post("/", async (req: AuthenticatedRequest, res: Response) => {
     const statusCode = result.syncStatus === "failed" ? 207 : 201;
 
     // Store idempotency record if key provided
+    const statusCode = result.syncStatus === "failed" ? 207 : 200;
     if (idempotencyKey) {
       await idempotencyService.storeResponse(
         idempotencyKey,
@@ -1065,6 +1184,13 @@ router.post("/bulk", validateBulkSubscriptionOwnership, async (req: Authenticate
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : "Failed to perform bulk operation",
+    logger.error("Pause subscription error:", error);
+    const statusCode =
+      error instanceof Error && error.message.includes("not found") ? 404
+        : error instanceof Error && error.message.includes("already paused") ? 409
+          : 500;
+    res.status(statusCode).json({
+      error: error instanceof Error ? error.message : "Failed to pause subscription",
     });
   const words = mnemonic.trim().split(/\s+/);
   if (words.length !== 12) {
@@ -1076,6 +1202,9 @@ router.post("/bulk", validateBulkSubscriptionOwnership, async (req: Authenticate
  * Update subscription with optimistic locking
  */
 router.patch("/:id", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+ * POST /api/subscriptions/:id/resume
+ * Resume a paused subscription — re-enables reminders and risk scoring
+router.post("/:id/resume", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const idempotencyKey = req.headers["idempotency-key"] as string;
     const requestHash = idempotencyService.hashRequest(req.body);
@@ -1285,6 +1414,8 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
     const result = await subscriptionService.cancelSubscription(
       req.user!.id,
       req.params.id,
+    const result = await subscriptionService.resumeSubscription(
+      resolveParam(req.params.id),
     );
 
     const responseBody = {
@@ -1322,6 +1453,11 @@ router.post("/:id/cancel", validateSubscriptionOwnership, async (req: Authentica
         error instanceof Error
           ? error.message
           : "Failed to cancel subscription",
+    logger.error("Resume subscription error:", error);
+      error instanceof Error && error.message.includes("not found") ? 404
+        : error instanceof Error && error.message.includes("not paused") ? 409
+          : 500;
+      error: error instanceof Error ? error.message : "Failed to resume subscription",
     });
   }
 });
