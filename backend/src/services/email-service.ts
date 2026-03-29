@@ -176,7 +176,10 @@ export class EmailService {
     }
 
     if (reminderType === 'trial_expiry') {
-      return `⏰ ${subscription.name} trial expires soon`;
+      if (daysBefore === 0) {
+        return `⚠️ Your ${subscription.name} trial ends TODAY — don't get charged!`;
+      }
+      return `⚠️ Your ${subscription.name} trial ends in ${daysBefore} day${daysBefore > 1 ? 's' : ''} — don't get charged!`;
     }
 
     return `🔔 ${subscription.name} reminder`;
@@ -185,53 +188,130 @@ export class EmailService {
   /**
    * Generate email HTML template
    */
-  private getEmailTemplate(payload: NotificationPayload): string {
-    const { subscription, daysBefore, renewalDate, reminderType } = payload;
-    const renewalDateFormatted = new Date(renewalDate).toLocaleDateString(
-      'en-US',
-      { year: 'numeric', month: 'long', day: 'numeric' }
-    );
+  /**
+     * Generate email HTML template
+     */
+    private getEmailTemplate(payload: NotificationPayload): string {
+      const { subscription, daysBefore, renewalDate, reminderType } = payload;
+      const renewalDateFormatted = new Date(renewalDate).toLocaleDateString(
+        'en-US',
+        { year: 'numeric', month: 'long', day: 'numeric' }
+      );
 
-    return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Subscription Reminder</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-    <h1 style="color: white; margin: 0; font-size: 28px;">Subscription Reminder</h1>
-  </div>
-  
-  <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
-    <h2 style="color: #333; margin-top: 0;">${this.getEmailSubject(payload).replace(/[📅⚠️⏰🔔]/g, '')}</h2>
-    
-    <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #667eea;">
-      <p style="margin: 0 0 10px 0;"><strong>Service:</strong> ${subscription.name}</p>
-      <p style="margin: 0 0 10px 0;"><strong>Category:</strong> ${subscription.category}</p>
-      <p style="margin: 0 0 10px 0;"><strong>Price:</strong> $${subscription.price.toFixed(2)}/${subscription.billing_cycle}</p>
-      <p style="margin: 0 0 10px 0;"><strong>Renewal Date:</strong> ${renewalDateFormatted}</p>
-      ${daysBefore > 0 ? `<p style="margin: 0;"><strong>Days Remaining:</strong> ${daysBefore}</p>` : ''}
+      if (reminderType === 'trial_expiry') {
+        return this.getTrialEmailTemplate(payload, renewalDateFormatted);
+      }
+
+      return `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subscription Reminder</title>
+  </head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+      <h1 style="color: white; margin: 0; font-size: 28px;">Subscription Reminder</h1>
     </div>
 
-    ${subscription.renewal_url ? `
-    <div style="text-align: center; margin: 30px 0;">
-      <a href="${sanitizeUrl(subscription.renewal_url)}" style="background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">
-        Manage Subscription
-      </a>
-    </div>
-    ` : ''}
+    <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+      <h2 style="color: #333; margin-top: 0;">${this.getEmailSubject(payload).replace(/[📅⚠️⏰🔔]/g, '')}</h2>
 
-    <p style="color: #666; font-size: 14px; margin-top: 30px;">
-      This is an automated reminder from Synchro. You're receiving this because you have a subscription renewal coming up.
-    </p>
-  </div>
-</body>
-</html>
-    `.trim();
-  }
+      <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #667eea;">
+        <p style="margin: 0 0 10px 0;"><strong>Service:</strong> ${subscription.name}</p>
+        <p style="margin: 0 0 10px 0;"><strong>Category:</strong> ${subscription.category}</p>
+        <p style="margin: 0 0 10px 0;"><strong>Price:</strong> $${subscription.price.toFixed(2)}/${subscription.billing_cycle}</p>
+        <p style="margin: 0 0 10px 0;"><strong>Renewal Date:</strong> ${renewalDateFormatted}</p>
+        ${daysBefore > 0 ? `<p style="margin: 0;"><strong>Days Remaining:</strong> ${daysBefore}</p>` : ''}
+      </div>
+
+      ${subscription.renewal_url ? `
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${sanitizeUrl(subscription.renewal_url)}" style="background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">
+          Manage Subscription
+        </a>
+      </div>
+      ` : ''}
+
+      <p style="color: #666; font-size: 14px; margin-top: 30px;">
+        This is an automated reminder from Synchro. You're receiving this because you have a subscription renewal coming up.
+      </p>
+    </div>
+  </body>
+  </html>
+      `.trim();
+    }
+
+    /**
+     * Generate trial-specific email HTML template
+     */
+    private getTrialEmailTemplate(payload: NotificationPayload, renewalDateFormatted: string): string {
+      const { subscription, daysBefore } = payload;
+      const chargePrice = subscription.trial_converts_to_price ?? subscription.price;
+      const urgencyColor = daysBefore <= 1 ? '#dc2626' : daysBefore <= 3 ? '#ea580c' : '#d97706';
+      const urgencyText = daysBefore === 0
+        ? 'Your trial ends TODAY at midnight'
+        : `Your trial ends in ${daysBefore} day${daysBefore > 1 ? 's' : ''}`;
+
+      const nextDayFormatted = new Date(
+        new Date(payload.renewalDate).getTime() + 24 * 60 * 60 * 1000
+      ).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      const cancelUrl = subscription.renewal_url ? sanitizeUrl(subscription.renewal_url) : null;
+      const keepUrl = sanitizeUrl(subscription.website_url || subscription.renewal_url || '#');
+
+      return `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trial Ending Soon</title>
+  </head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, ${urgencyColor} 0%, #7c3aed 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+      <p style="color: rgba(255,255,255,0.9); margin: 0 0 8px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Free Trial Ending</p>
+      <h1 style="color: white; margin: 0; font-size: 26px;">${subscription.name}</h1>
+    </div>
+
+    <div style="background: #fef9f0; border: 2px solid ${urgencyColor}; padding: 20px; text-align: center;">
+      <p style="margin: 0; font-size: 18px; font-weight: 700; color: ${urgencyColor};">⚠️ ${urgencyText}</p>
+    </div>
+
+    <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+      <div style="background: white; padding: 20px; border-radius: 8px; margin: 0 0 20px 0; border-left: 4px solid ${urgencyColor};">
+        <p style="margin: 0 0 8px 0;"><strong>Service:</strong> ${subscription.name}</p>
+        <p style="margin: 0 0 8px 0;"><strong>FREE trial expires:</strong> ${renewalDateFormatted}</p>
+        <p style="margin: 0; color: ${urgencyColor};"><strong>If you don't cancel:</strong> You'll be charged <strong>$${chargePrice.toFixed(2)}/${subscription.billing_cycle}</strong> starting ${nextDayFormatted}.</p>
+      </div>
+
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+        <tr>
+          ${cancelUrl ? `
+          <td style="padding-right: 6px;">
+            <a href="${cancelUrl}" style="display: block; background: ${urgencyColor}; color: white; padding: 14px 20px; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 15px; text-align: center;">
+              Cancel Trial Now →
+            </a>
+          </td>
+          ` : ''}
+          <td style="padding-left: 6px;">
+            <a href="${keepUrl}" style="display: block; background: #1e293b; color: white; padding: 14px 20px; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 15px; text-align: center;">
+              Keep My Subscription →
+            </a>
+          </td>
+        </tr>
+      </table>
+
+      <p style="color: #666; font-size: 13px; margin-top: 24px; text-align: center;">
+        This reminder was sent by SYNCRO to help you avoid unexpected charges.
+      </p>
+    </div>
+  </body>
+  </html>
+      `.trim();
+    }
+
 
   /**
    * Generate plain text email

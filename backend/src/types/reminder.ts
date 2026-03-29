@@ -46,6 +46,12 @@ export interface Subscription {
   expired_at: string | null;
   created_at: string;
   updated_at: string;
+  // Trial tracking
+  is_trial: boolean;
+  trial_ends_at: string | null;
+  trial_converts_to_price: number | null;
+  credit_card_required: boolean;
+  website_url: string | null;
 }
 
 export interface UserProfile {

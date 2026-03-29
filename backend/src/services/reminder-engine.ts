@@ -101,12 +101,16 @@ export class ReminderEngine {
         return;
       }
 
-      const renewalDate = subscription.active_until || new Date().toISOString();
+      const renewalDate = reminder.reminder_type === 'trial_expiry'
+        ? (subscription.trial_ends_at || new Date().toISOString())
+        : (subscription.active_until || new Date().toISOString());
       const payload: NotificationPayload = {
-        title: `${subscription.name} Renewal Reminder`,
-        body: `${subscription.name} will renew in ${reminder.days_before} day${
-          reminder.days_before > 1 ? "s" : ""
-        }`,
+        title: reminder.reminder_type === 'trial_expiry'
+          ? `${subscription.name} Trial Ending Soon`
+          : `${subscription.name} Renewal Reminder`,
+        body: reminder.reminder_type === 'trial_expiry'
+          ? `Your ${subscription.name} trial ends in ${reminder.days_before} day${reminder.days_before > 1 ? 's' : ''}`
+          : `${subscription.name} will renew in ${reminder.days_before} day${reminder.days_before > 1 ? 's' : ''}`,
         subscription,
         reminderType: reminder.reminder_type,
         daysBefore: reminder.days_before,
@@ -454,8 +458,91 @@ export class ReminderEngine {
       }
 
       logger.info("Reminder scheduling completed");
+
+      // Also schedule trial-specific reminders
+      await this.scheduleTrialReminders();
     } catch (error) {
       logger.error("Error scheduling reminders:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Schedule trial expiry reminders with aggressive windows: 14, 7, 3, 1, 0 days
+   * Credit-card-required trials get the 14-day early warning
+   */
+  async scheduleTrialReminders(): Promise<void> {
+    const TRIAL_REMINDER_WINDOWS = [14, 7, 3, 1, 0];
+
+    logger.info("Scheduling trial expiry reminders");
+
+    try {
+      const { data: trials, error } = await supabase
+        .from("subscriptions")
+        .select("*")
+        .eq("is_trial", true)
+        .in("status", ["active", "trial"])
+        .not("trial_ends_at", "is", null)
+        .gt("trial_ends_at", new Date().toISOString());
+
+      if (error) {
+        logger.error("Failed to fetch trial subscriptions:", error);
+        throw error;
+      }
+
+      if (!trials || trials.length === 0) {
+        logger.info("No active trials with future end dates");
+        return;
+      }
+
+      logger.info(`Found ${trials.length} active trials to schedule reminders for`);
+
+      for (const subscription of trials) {
+        const trialEndsAt = new Date(subscription.trial_ends_at);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Non-credit-card trials skip the 14-day window
+        const windows = subscription.credit_card_required
+          ? TRIAL_REMINDER_WINDOWS
+          : TRIAL_REMINDER_WINDOWS.filter((d) => d !== 14);
+
+        for (const days of windows) {
+          const reminderDate = new Date(trialEndsAt);
+          reminderDate.setDate(reminderDate.getDate() - days);
+          reminderDate.setHours(0, 0, 0, 0);
+
+          if (reminderDate >= today) {
+            const { data: existing } = await supabase
+              .from("reminder_schedules")
+              .select("id")
+              .eq("subscription_id", subscription.id)
+              .eq("reminder_type", "trial_expiry")
+              .eq("days_before", days)
+              .eq("status", "pending")
+              .single();
+
+            if (!existing) {
+              await supabase.from("reminder_schedules").insert({
+                subscription_id: subscription.id,
+                user_id: subscription.user_id,
+                reminder_date: reminderDate.toISOString().split("T")[0],
+                reminder_type: "trial_expiry",
+                days_before: days,
+                status: "pending",
+              });
+
+              logger.debug(
+                `Scheduled trial reminder for subscription ${subscription.id} (${days} days before trial end)`,
+              );
+            }
+          }
+        }
+      }
+
+      logger.info("Trial reminder scheduling completed");
+    } catch (error) {
+      logger.error("Error scheduling trial reminders:", error);
       throw error;
     }
   }

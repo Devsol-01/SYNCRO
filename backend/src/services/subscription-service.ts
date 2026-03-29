@@ -629,6 +629,155 @@ async resumeSubscription(
       throw error;
     }
   }
+
+  /**
+   * Convert a trial to a paid subscription (intentional — user clicked "Keep")
+   * Logs the conversion event and marks the subscription as active
+   */
+  async convertTrialToPaid(
+    userId: string,
+    subscriptionId: string,
+  ): Promise<SubscriptionSyncResult> {
+    return await DatabaseTransaction.execute(async (client) => {
+      const { data: subscription, error: fetchError } = await client
+        .from("subscriptions")
+        .select("*")
+        .eq("id", subscriptionId)
+        .eq("user_id", userId)
+        .single();
+
+      if (fetchError || !subscription) {
+        throw new Error("Subscription not found or access denied");
+      }
+
+      if (!subscription.is_trial) {
+        throw new Error("Subscription is not a trial");
+      }
+
+      const convertedPrice = subscription.trial_converts_to_price ?? subscription.price;
+
+      const { data: updated, error: updateError } = await client
+        .from("subscriptions")
+        .update({
+          is_trial: false,
+          status: "active",
+          price: convertedPrice,
+          trial_ends_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", subscriptionId)
+        .eq("user_id", userId)
+        .select()
+        .single();
+
+      if (updateError) throw new Error(`Update failed: ${updateError.message}`);
+
+      // Count how many trial reminders were sent
+      const { count: reminderCount } = await client
+        .from("reminder_schedules")
+        .select("*", { count: "exact", head: true })
+        .eq("subscription_id", subscriptionId)
+        .eq("reminder_type", "trial_expiry")
+        .eq("status", "sent");
+
+      await client.from("trial_conversion_events").insert({
+        subscription_id: subscriptionId,
+        user_id: userId,
+        conversion_type: "intentional",
+        reminder_count: reminderCount ?? 0,
+        acted_on_reminder: (reminderCount ?? 0) > 0,
+        saved_by_syncro: false,
+        converted_price: convertedPrice,
+      });
+
+      logger.info("Trial converted to paid (intentional)", { subscriptionId, userId });
+
+      let blockchainResult;
+      let syncStatus: "synced" | "partial" | "failed" = "synced";
+      try {
+        blockchainResult = await blockchainService.syncSubscription(userId, subscriptionId, "update", updated);
+        if (!blockchainResult.success) syncStatus = "partial";
+      } catch (e) {
+        syncStatus = "partial";
+        blockchainResult = { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
+
+      return { subscription: updated, blockchainResult, syncStatus };
+    });
+  }
+
+  /**
+   * Cancel a trial before auto-charge — logs as "saved by SYNCRO" if reminders were sent
+   */
+  async cancelTrial(
+    userId: string,
+    subscriptionId: string,
+  ): Promise<SubscriptionSyncResult> {
+    return await DatabaseTransaction.execute(async (client) => {
+      const { data: subscription, error: fetchError } = await client
+        .from("subscriptions")
+        .select("*")
+        .eq("id", subscriptionId)
+        .eq("user_id", userId)
+        .single();
+
+      if (fetchError || !subscription) {
+        throw new Error("Subscription not found or access denied");
+      }
+
+      if (!subscription.is_trial) {
+        throw new Error("Subscription is not a trial");
+      }
+
+      const { data: updated, error: updateError } = await client
+        .from("subscriptions")
+        .update({
+          status: "cancelled",
+          is_trial: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", subscriptionId)
+        .eq("user_id", userId)
+        .select()
+        .single();
+
+      if (updateError) throw new Error(`Update failed: ${updateError.message}`);
+
+      // Check if any trial reminders were sent (user was warned by SYNCRO)
+      const { count: reminderCount } = await client
+        .from("reminder_schedules")
+        .select("*", { count: "exact", head: true })
+        .eq("subscription_id", subscriptionId)
+        .eq("reminder_type", "trial_expiry")
+        .eq("status", "sent");
+
+      const savedBySyncro = (reminderCount ?? 0) > 0 && !!subscription.credit_card_required;
+
+      await client.from("trial_conversion_events").insert({
+        subscription_id: subscriptionId,
+        user_id: userId,
+        conversion_type: "cancelled",
+        reminder_count: reminderCount ?? 0,
+        acted_on_reminder: (reminderCount ?? 0) > 0,
+        saved_by_syncro: savedBySyncro,
+        converted_price: null,
+      });
+
+      logger.info("Trial cancelled", { subscriptionId, userId, savedBySyncro });
+
+      let blockchainResult;
+      let syncStatus: "synced" | "partial" | "failed" = "synced";
+      try {
+        blockchainResult = await blockchainService.syncSubscription(userId, subscriptionId, "cancel", updated);
+        if (!blockchainResult.success) syncStatus = "partial";
+      } catch (e) {
+        syncStatus = "partial";
+        blockchainResult = { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
+
+      return { subscription: updated, blockchainResult, syncStatus };
+    });
+  }
 }
 
 export const subscriptionService = new SubscriptionService();

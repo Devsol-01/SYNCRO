@@ -718,4 +718,56 @@ router.post("/bulk", validateBulkSubscriptionOwnership, async (req: Authenticate
   }
 });
 
+/**
+ * POST /api/subscriptions/:id/trial/convert
+ * Intentionally convert trial to paid (user clicked "Keep My Subscription")
+ */
+router.post("/:id/trial/convert", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await subscriptionService.convertTrialToPaid(
+      req.user!.id,
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    );
+    res.json({
+      success: true,
+      data: result.subscription,
+      blockchain: {
+        synced: result.syncStatus === "synced",
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    });
+  } catch (error) {
+    logger.error("Trial convert error:", error);
+    const statusCode = error instanceof Error && error.message.includes("not found") ? 404 : 500;
+    res.status(statusCode).json({ success: false, error: error instanceof Error ? error.message : "Failed to convert trial" });
+  }
+});
+
+/**
+ * POST /api/subscriptions/:id/trial/cancel
+ * Cancel a trial before auto-charge
+ */
+router.post("/:id/trial/cancel", validateSubscriptionOwnership, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await subscriptionService.cancelTrial(
+      req.user!.id,
+      Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
+    );
+    res.json({
+      success: true,
+      data: result.subscription,
+      blockchain: {
+        synced: result.syncStatus === "synced",
+        transactionHash: result.blockchainResult?.transactionHash,
+        error: result.blockchainResult?.error,
+      },
+    });
+  } catch (error) {
+    logger.error("Trial cancel error:", error);
+    const statusCode = error instanceof Error && error.message.includes("not found") ? 404 : 500;
+    res.status(statusCode).json({ success: false, error: error instanceof Error ? error.message : "Failed to cancel trial" });
+  }
+});
+
 export default router;
