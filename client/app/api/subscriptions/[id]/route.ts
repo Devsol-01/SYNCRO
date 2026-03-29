@@ -1,9 +1,9 @@
 import { type NextRequest } from "next/server"
-import { createApiRoute, createSuccessResponse, validateRequestBody, validateRouteParams, RateLimiters } from "@/lib/api"
-import { HttpStatus, ApiErrors } from "@/lib/api/types"
+import { HttpStatus } from "@/lib/api/types"
 import { z } from "zod"
 import { createClient } from "@/lib/supabase/server"
 import { checkOwnership } from "@/lib/api/auth"
+import { ApiErrors, createApiRoute, createSuccessResponse, RateLimiters, validateRequestBody } from "@/lib/api/index"
 
 // Validation schemas
 const updateSubscriptionSchema = z.object({
