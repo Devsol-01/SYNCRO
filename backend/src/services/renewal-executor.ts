@@ -1,7 +1,6 @@
 import logger from '../config/logger';
 import { supabase } from '../config/database';
 import { blockchainService } from './blockchain-service';
-import { DatabaseTransaction } from '../utils/transaction';
 import { webhookService } from './webhook-service';
 import { addMonths, addQuarters, addYears } from 'date-fns';
 
@@ -24,53 +23,46 @@ export class RenewalExecutor {
   async executeRenewal(request: RenewalRequest): Promise<RenewalResult> {
     const { subscriptionId, userId, approvalId, amount } = request;
 
-    return await DatabaseTransaction.execute(async (client) => {
-      try {
-        // Step 1: Check approval
-        const approval = await this.checkApproval(client, subscriptionId, approvalId, amount);
-        if (!approval.valid) {
-          return this.logFailure(subscriptionId, userId, 'invalid_approval', approval.reason);
-        }
-
-        // Step 2: Validate billing window
-        const billingWindow = await this.validateBillingWindow(client, subscriptionId);
-        if (!billingWindow.valid) {
-          return this.logFailure(subscriptionId, userId, 'billing_window_invalid', billingWindow.reason);
-        }
-
-        // Step 3: Trigger contract renewal
-        const contractResult = await this.triggerContractRenewal(
-          subscriptionId,
-          approvalId,
-          amount
-        );
-
-        if (!contractResult.success) {
-          return this.logFailure(subscriptionId, userId, 'contract_failure', contractResult.error);
-        }
-
-        // Step 4: Update DB
-        await this.updateSubscription(
-          client,
-          subscriptionId,
-          billingWindow.billingCycle as 'monthly' | 'quarterly' | 'yearly',
-          contractResult.transactionHash
-        );
-
-        // Step 5: Log result
-        await this.logSuccess(client, subscriptionId, userId, contractResult.transactionHash);
-
-        return {
-          success: true,
-          subscriptionId,
-          transactionHash: contractResult.transactionHash,
-        };
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        logger.error('Renewal execution failed:', { subscriptionId, error: errorMsg });
-        return this.logFailure(subscriptionId, userId, 'execution_error', errorMsg);
+    try {
+      // Step 1: Check approval
+      const approval = await this.checkApproval(subscriptionId, approvalId, amount);
+      if (!approval.valid) {
+        return await this.logFailure(subscriptionId, userId, 'invalid_approval', approval.reason);
       }
-    });
+
+      // Step 2: Validate billing window
+      const billingWindow = await this.validateBillingWindow(subscriptionId);
+      if (!billingWindow.valid) {
+        return await this.logFailure(subscriptionId, userId, 'billing_window_invalid', billingWindow.reason);
+      }
+
+      // Step 3: Trigger contract renewal
+      const contractResult = await this.triggerContractRenewal(
+        subscriptionId,
+        approvalId,
+        amount
+      );
+
+      if (!contractResult.success) {
+        return await this.logFailure(subscriptionId, userId, 'contract_failure', contractResult.error);
+      }
+
+      // Step 4: Update DB
+      await this.updateSubscription(subscriptionId, contractResult.transactionHash);
+
+      // Step 5: Log result
+      await this.logSuccess(subscriptionId, userId, contractResult.transactionHash);
+
+      return {
+        success: true,
+        subscriptionId,
+        transactionHash: contractResult.transactionHash,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error('Renewal execution failed:', { subscriptionId, error: errorMsg });
+      return await this.logFailure(subscriptionId, userId, 'execution_error', errorMsg);
+    }
   }
 
   async executeRenewalWithRetry(request: RenewalRequest, maxRetries = 3): Promise<RenewalResult> {
@@ -97,12 +89,11 @@ export class RenewalExecutor {
   }
 
   private async checkApproval(
-    client: any,
     subscriptionId: string,
     approvalId: string,
     amount: number
   ): Promise<{ valid: boolean; reason?: string }> {
-    const { data: approval, error } = await client
+    const { data: approval, error } = await supabase
       .from('renewal_approvals')
       .select('*')
       .eq('subscription_id', subscriptionId)
@@ -126,10 +117,9 @@ export class RenewalExecutor {
   }
 
   private async validateBillingWindow(
-    client: any,
     subscriptionId: string
-  ): Promise<{ valid: boolean; reason?: string; billingCycle?: string }> {
-    const { data: subscription, error } = await client
+  ): Promise<{ valid: boolean; reason?: string }> {
+    const { data: subscription, error } = await supabase
       .from('subscriptions')
       .select('next_billing_date, status, billing_cycle')
       .eq('id', subscriptionId)
@@ -160,8 +150,7 @@ export class RenewalExecutor {
     amount: number
   ): Promise<{ success: boolean; transactionHash?: string; error?: string }> {
     try {
-      // TODO: Implement actual Soroban contract call
-      // For now, simulate contract interaction
+      // Simulate contract interaction via blockchainService
       const result = await blockchainService.syncSubscription(
         subscriptionId,
         subscriptionId,
@@ -183,7 +172,6 @@ export class RenewalExecutor {
   }
 
   private async updateSubscription(
-    client: any,
     subscriptionId: string,
     billingCycle: 'monthly' | 'quarterly' | 'yearly',
     transactionHash?: string
@@ -205,7 +193,7 @@ export class RenewalExecutor {
         nextBilling = addMonths(now, 1);
     }
 
-    await client
+    await supabase
       .from('subscriptions')
       .update({
         status: 'active',
@@ -218,12 +206,11 @@ export class RenewalExecutor {
   }
 
   private async logSuccess(
-    client: any,
     subscriptionId: string,
     userId: string,
     transactionHash?: string
   ): Promise<void> {
-    await client.from('renewal_logs').insert({
+    await supabase.from('renewal_logs').insert({
       subscription_id: subscriptionId,
       user_id: userId,
       status: 'success',
@@ -234,12 +221,14 @@ export class RenewalExecutor {
     logger.info('Renewal executed successfully', { subscriptionId, transactionHash });
 
     // Dispatch webhook event
-    webhookService.dispatchEvent(userId, 'subscription.renewed', {
-      subscription_id: subscriptionId,
-      transaction_hash: transactionHash
-    }).catch(err => {
+    try {
+      webhookService.dispatchEvent(userId, 'subscription.renewed', {
+        subscription_id: subscriptionId,
+        transaction_hash: transactionHash
+      });
+    } catch (err) {
       logger.error('Failed to dispatch subscription.renewed webhook:', err);
-    });
+    }
   }
 
   private async logFailure(
@@ -260,13 +249,15 @@ export class RenewalExecutor {
     logger.error('Renewal failed', { subscriptionId, failureReason, errorMessage });
 
     // Dispatch webhook event
-    webhookService.dispatchEvent(userId, 'subscription.renewal_failed', {
-      subscription_id: subscriptionId,
-      failure_reason: failureReason,
-      error_message: errorMessage
-    }).catch(err => {
+    try {
+      webhookService.dispatchEvent(userId, 'subscription.renewal_failed', {
+        subscription_id: subscriptionId,
+        failure_reason: failureReason,
+        error_message: errorMessage
+      });
+    } catch (err) {
       logger.error('Failed to dispatch subscription.renewal_failed webhook:', err);
-    });
+    }
 
     return {
       success: false,
