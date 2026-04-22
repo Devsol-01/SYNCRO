@@ -1,94 +1,102 @@
-import { parseSubscriptionEmail } from './email-parser'
-import { generateProofHash, hashContent } from '../utils/proof-hashing'
+import { parseSubscriptionEmail } from "./email-parser";
+import { generateProofHash, hashContent } from "../utils/proof-hashing";
+import { metadataExtractionOnly } from "./email-scanner";
+import type { RawScanResult } from "./email-scanner";
 
-const OUTLOOK_SCOPES = ['offline_access', 'User.Read', 'Mail.Read']
+const OUTLOOK_SCOPES = ["offline_access", "User.Read", "Mail.Read"];
 
 const KEYWORDS = [
-  'subscription',
-  'renewal',
-  'invoice',
-  'receipt',
-  'billing',
-  'charged',
-  'trial',
-  'membership',
-  'plan',
-]
+  "subscription",
+  "renewal",
+  "invoice",
+  "receipt",
+  "billing",
+  "charged",
+  "trial",
+  "membership",
+  "plan",
+];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface OutlookTokenResponse {
-  access_token: string
-  refresh_token?: string
-  expires_in: number
-  scope: string
-  token_type: string
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  scope: string;
+  token_type: string;
 }
 
 interface OutlookProfile {
-  mail?: string
-  userPrincipalName: string
-  displayName?: string
+  mail?: string;
+  userPrincipalName: string;
+  displayName?: string;
 }
 
 interface ScanOutlookOptions {
-  accessToken: string
-  refreshToken?: string
-  expiresAt?: string
-  maxResults?: number
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: string;
+  maxResults?: number;
 }
 
 interface TokenRequestParams {
-  grant_type: string
-  code?: string
-  redirect_uri?: string
-  refresh_token?: string
+  grant_type: string;
+  code?: string;
+  redirect_uri?: string;
+  refresh_token?: string;
 }
 
 // ── Exported functions ────────────────────────────────────────────────────────
 
 export function getOutlookAuthUrl(state?: string): string {
   const params = new URLSearchParams({
-    client_id:     process.env.MICROSOFT_CLIENT_ID ?? '',
-    response_type: 'code',
-    redirect_uri:  process.env.MICROSOFT_REDIRECT_URI ?? '',
-    response_mode: 'query',
-    scope:         OUTLOOK_SCOPES.join(' '),
-    prompt:        'consent',
-  })
+    client_id: process.env.MICROSOFT_CLIENT_ID ?? "",
+    response_type: "code",
+    redirect_uri: process.env.MICROSOFT_REDIRECT_URI ?? "",
+    response_mode: "query",
+    scope: OUTLOOK_SCOPES.join(" "),
+    prompt: "consent",
+  });
 
-  if (state) params.set('state', state)
+  if (state) params.set("state", state);
 
-  const tenant = process.env.MICROSOFT_TENANT_ID ?? 'common'
-  return `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?${params.toString()}`
+  const tenant = process.env.MICROSOFT_TENANT_ID ?? "common";
+  return `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?${params.toString()}`;
 }
 
-export async function exchangeOutlookCodeForTokens(code: string): Promise<OutlookTokenResponse> {
+export async function exchangeOutlookCodeForTokens(
+  code: string,
+): Promise<OutlookTokenResponse> {
   return requestOutlookToken({
     code,
-    grant_type:   'authorization_code',
-    redirect_uri: process.env.MICROSOFT_REDIRECT_URI ?? '',
-  })
+    grant_type: "authorization_code",
+    redirect_uri: process.env.MICROSOFT_REDIRECT_URI ?? "",
+  });
 }
 
-export async function refreshOutlookToken(refreshToken: string): Promise<OutlookTokenResponse> {
+export async function refreshOutlookToken(
+  refreshToken: string,
+): Promise<OutlookTokenResponse> {
   return requestOutlookToken({
     refresh_token: refreshToken,
-    grant_type:    'refresh_token',
-  })
+    grant_type: "refresh_token",
+  });
 }
 
-export async function getOutlookProfile(accessToken: string): Promise<OutlookProfile> {
-  const response = await fetch('https://graph.microsoft.com/v1.0/me', {
+export async function getOutlookProfile(
+  accessToken: string,
+): Promise<OutlookProfile> {
+  const response = await fetch("https://graph.microsoft.com/v1.0/me", {
     headers: { Authorization: `Bearer ${accessToken}` },
-  })
+  });
 
   if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Outlook profile fetch failed: ${error}`)
+    const error = await response.text();
+    throw new Error(`Outlook profile fetch failed: ${error}`);
   }
 
-  return response.json() as Promise<OutlookProfile>
+  return response.json() as Promise<OutlookProfile>;
 }
 
 export async function scanOutlookSubscriptions({
@@ -97,101 +105,107 @@ export async function scanOutlookSubscriptions({
   expiresAt,
   maxResults = 50,
 }: ScanOutlookOptions) {
-  let token = accessToken
+  let token = accessToken;
 
   if (expiresAt && refreshToken && new Date(expiresAt) <= new Date()) {
-    const refreshed = await refreshOutlookToken(refreshToken)
-    token = refreshed.access_token
+    const refreshed = await refreshOutlookToken(refreshToken);
+    token = refreshed.access_token;
   }
 
-  const searchQuery = KEYWORDS.join(' OR ')
-  const url = new URL('https://graph.microsoft.com/v1.0/me/messages')
-  url.searchParams.set('$search', `"${searchQuery}"`)
-  url.searchParams.set('$select', 'id,subject,from,receivedDateTime,body')
-  url.searchParams.set('$top', String(maxResults))
+  const searchQuery = KEYWORDS.join(" OR ");
+  const url = new URL("https://graph.microsoft.com/v1.0/me/messages");
+  url.searchParams.set("$search", `"${searchQuery}"`);
+  url.searchParams.set("$select", "id,subject,from,receivedDateTime,body");
+  url.searchParams.set("$top", String(maxResults));
 
   const response = await fetch(url.toString(), {
     headers: {
-      Authorization:    `Bearer ${token}`,
-      ConsistencyLevel: 'eventual',
-      Prefer:           'outlook.body-content-type="text"',
+      Authorization: `Bearer ${token}`,
+      ConsistencyLevel: "eventual",
+      Prefer: 'outlook.body-content-type="text"',
     },
-  })
+  });
 
   if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Outlook message scan failed: ${error}`)
+    const error = await response.text();
+    throw new Error(`Outlook message scan failed: ${error}`);
   }
 
-  const data = await response.json() as { value?: any[] }
-  const results = []
+  const data = (await response.json()) as { value?: any[] };
+  const results: RawScanResult[] = [];
 
   for (const message of data.value ?? []) {
-    const subject    = message.subject ?? null
-    const from       = message.from?.emailAddress?.name ?? message.from?.emailAddress?.address ?? null
-    const receivedAt = message.receivedDateTime ?? null
-    let body: string | null = message.body?.content ?? ''
+    const subject = message.subject ?? null;
+    const from =
+      message.from?.emailAddress?.name ??
+      message.from?.emailAddress?.address ??
+      null;
+    const receivedAt = message.receivedDateTime ?? null;
+    let body: string | null = message.body?.content ?? "";
 
-    const parsed = parseSubscriptionEmail({ subject, from, body })
-    if (!parsed) continue
+    const parsed = parseSubscriptionEmail({ subject, from, body });
+    if (!parsed) continue;
 
-    const contentHash = hashContent(body)
+    const contentHash = hashContent(body);
     // Discard raw email content after hashing/parsing
-    body = null
+    body = null;
 
     const proofHash = generateProofHash({
-      provider: 'outlook',
+      provider: "outlook",
       messageId: message.id,
       receivedAt,
       subject,
       from,
-      amount:   parsed.amount,
+      amount: parsed.amount,
       currency: parsed.currency,
       interval: parsed.interval,
       contentHash,
-    })
+    });
 
     results.push({
-      provider: 'outlook',
+      provider: "outlook",
       messageId: message.id,
+      threadId: null,
       receivedAt,
       subject,
       from,
       ...parsed,
       proof: {
-        hash:      proofHash,
+        hash: proofHash,
         contentHash,
-        algorithm: 'sha256',
+        algorithm: "sha256",
       },
-    })
+    });
   }
 
-  return results
+  return metadataExtractionOnly(results);
 }
 
 // ── Internal helper ───────────────────────────────────────────────────────────
 
-async function requestOutlookToken(params: TokenRequestParams): Promise<OutlookTokenResponse> {
+async function requestOutlookToken(
+  params: TokenRequestParams,
+): Promise<OutlookTokenResponse> {
   const body = new URLSearchParams({
-    client_id:     process.env.MICROSOFT_CLIENT_ID ?? '',
-    client_secret: process.env.MICROSOFT_CLIENT_SECRET ?? '',
+    client_id: process.env.MICROSOFT_CLIENT_ID ?? "",
+    client_secret: process.env.MICROSOFT_CLIENT_SECRET ?? "",
     ...params,
-  })
+  });
 
-  const tenant   = process.env.MICROSOFT_TENANT_ID ?? 'common'
+  const tenant = process.env.MICROSOFT_TENANT_ID ?? "common";
   const response = await fetch(
     `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
     {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
     },
-  )
+  );
 
   if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Outlook token exchange failed: ${error}`)
+    const error = await response.text();
+    throw new Error(`Outlook token exchange failed: ${error}`);
   }
 
-  return response.json() as Promise<OutlookTokenResponse>
+  return response.json() as Promise<OutlookTokenResponse>;
 }
