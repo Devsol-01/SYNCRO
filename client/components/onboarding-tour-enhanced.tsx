@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import Joyride, { CallBackProps, STATUS, EVENTS, ACTIONS } from "react-joyride"
+import Joyride, { CallBackProps, STATUS, EVENTS, ACTIONS } from "react-joyride-react-19"
 import { Plus, Mail, Wallet, Sparkles } from "lucide-react"
 
 interface OnboardingTourEnhancedProps {
@@ -12,35 +12,6 @@ interface OnboardingTourEnhancedProps {
 }
 
 const TOUR_STEPS = [
-  {
-    target: "body",
-    content: (
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h2 className="text-xl font-semibold">Welcome to SYNCRO!</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">Your subscription management made simple</p>
-          </div>
-        </div>
-        <p className="text-gray-700 dark:text-gray-300">
-          Let's take a quick 2-minute tour to help you get started with the core features. 
-          We'll show you how to add subscriptions, connect your email, and set up budget tracking.
-        </p>
-        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-          <div className="px-2 py-1 bg-blue-100 dark:bg-blue-900 rounded text-blue-700 dark:text-blue-300 text-xs font-medium">
-            3 steps
-          </div>
-          <span>•</span>
-          <span>~2 minutes</span>
-        </div>
-      </div>
-    ),
-    placement: "center" as const,
-    disableBeacon: true,
-  },
   {
     target: "[data-tour='add-subscription']",
     content: (
@@ -74,6 +45,13 @@ const TOUR_STEPS = [
             </div>
           </div>
         </div>
+        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+          <div className="px-2 py-1 bg-blue-100 dark:bg-blue-900 rounded text-blue-700 dark:text-blue-300 text-xs font-medium">
+            Step 1 of 3
+          </div>
+          <span>•</span>
+          <span>~2 minutes</span>
+        </div>
       </div>
     ),
     placement: "bottom" as const,
@@ -106,6 +84,11 @@ const TOUR_STEPS = [
             <strong>Privacy First:</strong> We only scan for subscription-related emails and never store your personal messages.
           </p>
         </div>
+        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+          <div className="px-2 py-1 bg-blue-100 dark:bg-blue-900 rounded text-blue-700 dark:text-blue-300 text-xs font-medium">
+            Step 2 of 3
+          </div>
+        </div>
       </div>
     ),
     placement: "right" as const,
@@ -118,10 +101,10 @@ const TOUR_STEPS = [
           <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center">
             <Wallet className="w-4 h-4 text-white" />
           </div>
-          <h3 className="text-lg font-semibold">Set Up Budget Tracking</h3>
+          <h3 className="text-lg font-semibold">Set Up Wallet</h3>
         </div>
         <p className="text-gray-700 dark:text-gray-300">
-          Configure payment methods and budget limits to track spending and get alerts when approaching limits.
+          Configure your wallet and budget limits to track spending and get alerts when approaching limits.
         </p>
         <div className="space-y-3">
           <div className="flex items-start gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
@@ -145,8 +128,13 @@ const TOUR_STEPS = [
         </div>
         <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
           <p className="text-xs text-green-800 dark:text-green-200">
-            <strong>🎉 You're all set!</strong> Start adding subscriptions to see the magic happen.
+            <strong>🎉 Setup Complete!</strong> You're ready to manage your subscriptions.
           </p>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+          <div className="px-2 py-1 bg-green-100 dark:bg-green-900 rounded text-green-700 dark:text-green-300 text-xs font-medium">
+            Step 3 of 3
+          </div>
         </div>
       </div>
     ),

@@ -1,8 +1,8 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { OnboardingTourEnhanced, useOnboardingTourEnhanced } from '../onboarding-tour-enhanced'
 
-// Mock react-joyride
-jest.mock('react-joyride', () => {
+// Mock react-joyride-react-19
+jest.mock('react-joyride-react-19', () => {
   return function MockJoyride({ run, steps, callback }: any) {
     if (!run) return null
     

@@ -18,7 +18,7 @@ import ManageSubscriptionModal from "@/components/modals/manage-subscription-mod
 import InsightsModal from "@/components/modals/insights-modal";
 import InsightsPage from "@/components/pages/insights";
 import EditSubscriptionModal from "@/components/modals/edit-subscription-modal";
-import { OnboardingTourSimple, useOnboardingTourSimple } from "@/components/onboarding-tour-simple";
+import { OnboardingTourEnhanced, useOnboardingTourEnhanced } from "@/components/onboarding-tour-enhanced";
 import { Toast, ToastContainer } from "@/components/ui/toast";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";

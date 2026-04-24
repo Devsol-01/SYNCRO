@@ -597,7 +597,7 @@ export default function SettingsPage({
             <div>
               <p className={`font-medium ${darkMode ? "text-white" : "text-gray-900"}`}>Restart Onboarding Tour</p>
               <p className={`text-sm ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
-                Take the guided 2-minute tour again to learn about key features: Add Subscriptions, Connect Email, and Set Wallet
+                Take the guided 3-step, 2-minute tour to learn about key features: Add Subscriptions, Connect Email, and Set Wallet
               </p>
             </div>
             <button
