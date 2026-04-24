@@ -17,6 +17,7 @@ import teamRoutes from './routes/team';
 import auditRoutes from './routes/audit';
 import webhookRoutes from './routes/webhooks';
 import tagsRoutes from './routes/tags';
+import userRoutes from './routes/user';
 import { monitoringService } from './services/monitoring-service';
 import { healthService } from './services/health-service';
 import { eventListener } from './services/event-listener';
@@ -68,6 +69,7 @@ app.use('/api/team', teamRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/tags', tagsRoutes);
+app.use('/api/user', userRoutes);
 app.use('/api', tagsRoutes); // handles /api/subscriptions/:id/notes and /api/subscriptions/:id/tags
 
 // API Routes (Public/Standard)
@@ -104,13 +106,16 @@ app.get('/api/admin/metrics/activity', createAdminLimiter(), adminAuth, async (r
   }
 });
 
-// Protocol Health Monitor: unified admin health (metrics, alerts, history)
+// Protocol Health Monitor: unified admin health (metrics, alerts, history, db pool)
 app.get('/api/admin/health', createAdminLimiter(), adminAuth, async (req, res) => {
   try {
     const includeHistory = req.query.history !== 'false';
     const health = await healthService.getAdminHealth(includeHistory);
     const statusCode = health.status === 'unhealthy' ? 503 : 200;
-    res.status(statusCode).json(health);
+    res.status(statusCode).json({
+      ...health,
+      db_pool: monitoringService.getPoolMetrics(),
+    });
   } catch (error) {
     logger.error('Error fetching admin health:', error);
     res.status(500).json({ error: 'Failed to fetch health status' });

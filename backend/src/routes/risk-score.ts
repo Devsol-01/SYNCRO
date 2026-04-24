@@ -6,6 +6,7 @@ import express, { Response } from 'express';
 import { riskDetectionService } from '../services/risk-detection/risk-detection-service';
 import { riskNotificationService } from '../services/risk-detection/risk-notification-service';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import { adminAuth } from '../middleware/admin';
 import logger from '../config/logger';
 
 const router = express.Router();
@@ -97,10 +98,9 @@ router.get('/', async (req: AuthenticatedRequest, res: Response) => {
 
 /**
  * POST /api/risk-score/recalculate
- * Manually trigger risk recalculation for all subscriptions
- * Note: In production, this should be admin-only
+ * Manually trigger risk recalculation for all subscriptions — admin only
  */
-router.post('/recalculate', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/recalculate', adminAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user?.id;
 
@@ -110,9 +110,6 @@ router.post('/recalculate', async (req: AuthenticatedRequest, res: Response) => 
         error: 'Unauthorized',
       });
     }
-
-    // TODO: Add admin check
-    // For now, allow any authenticated user to trigger recalculation
 
     logger.info('Manual risk recalculation triggered', { user_id: userId });
 
