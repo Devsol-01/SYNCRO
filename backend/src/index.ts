@@ -33,6 +33,7 @@ import auditRoutes from './routes/audit';
 import webhookRoutes from './routes/webhooks';
 import complianceRoutes from './routes/compliance';
 import tagsRoutes from './routes/tags';
+import userRoutes from './routes/user';
 import apiKeysRoutes from './routes/api-keys';
 import digestRoutes from './routes/digest';
 import mfaRoutes from './routes/mfa';
@@ -120,6 +121,7 @@ app.use('/api/integrations/outlook', authenticate, outlookRouter);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/compliance', complianceRoutes);
 app.use('/api/tags', tagsRoutes);
+app.use('/api/user', userRoutes);
 app.use('/api/digest', digestRoutes);
 app.use('/api/mfa', mfaRoutes);
 app.use('/api/notifications/push', pushNotificationRoutes);
@@ -163,7 +165,10 @@ app.get('/api/admin/health', createAdminLimiter(), adminAuth, async (req, res) =
     const includeHistory = req.query.history !== 'false';
     const health = await healthService.getAdminHealth(includeHistory, eventListener.getHealth());
     const statusCode = health.status === 'unhealthy' ? 503 : 200;
-    res.status(statusCode).json(health);
+    res.status(statusCode).json({
+      ...health,
+      db_pool: monitoringService.getPoolMetrics(),
+    });
   } catch (error) {
     logger.error('Error fetching admin health:', error);
     res.status(500).json({ error: 'Failed to fetch health status' });

@@ -1,4 +1,4 @@
-import { supabase } from '../config/database';
+import { supabase, monitorPool, PoolMetrics } from '../config/database';
 import logger from '../config/logger';
 
 export interface SubscriptionMetrics {
@@ -217,6 +217,11 @@ export class MonitoringService {
         logger.error('Error fetching trial metrics:', error);
         throw error;
       }
+    }
+
+    /** Returns current DB connection pool metrics. */
+    getPoolMetrics(): PoolMetrics {
+        return monitorPool();
     }
 }
 
