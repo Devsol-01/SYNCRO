@@ -85,4 +85,35 @@ router.get('/vapid-public-key', (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /api/notifications/push/vapid-public-key:
+ *   get:
+ *     tags: [Push Notifications]
+ *     summary: Get the VAPID public key for push subscriptions
+ *     responses:
+ *       200:
+ *         description: VAPID public key
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     publicKey: { type: string }
+ */
+router.get('/vapid-public-key', (req: Request, res: Response) => {
+  try {
+    const { pushService } = require('../services/push-service');
+    const publicKey = pushService.getVapidPublicKey();
+    return res.json({ success: true, data: { publicKey } });
+  } catch (err) {
+    logger.error('VAPID public key error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
 export default router;
