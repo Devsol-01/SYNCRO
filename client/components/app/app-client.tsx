@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useCallback } from "react";
 import WelcomePage from "@/components/pages/welcome";
 import EnterpriseSetup from "@/components/pages/enterprise-setup";
 import DashboardPage from "@/components/pages/dashboard";
@@ -26,7 +26,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { AppLayout } from "@/components/layout/app-layout";
 import type { Subscription as DBSubscription } from "@/lib/supabase/subscriptions";
-import { deleteSubscription } from "@/lib/supabase/subscriptions";
+import { createSubscription } from "@/lib/supabase/subscriptions";
 import { isOnline } from "@/lib/network-utils";
 import type { Currency } from "@/lib/currency-utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -37,6 +37,8 @@ import { useBulkActions } from "@/hooks/use-bulk-actions";
 import { useEmailAccounts } from "@/hooks/use-email-accounts";
 import { useNotifications } from "@/hooks/use-notifications";
 import { useNotificationActions } from "@/hooks/use-notification-actions";
+import { UndoProvider, useUndoContext } from "@/components/providers/undo-context";
+import UndoPanel from "@/components/undo-panel";
 import {
     checkRenewalReminders,
     detectDuplicates,
@@ -68,6 +70,32 @@ export function AppClient({
     initialPriceChanges = [],
     initialConsolidationSuggestions = [],
 }: AppClientProps) {
+    return (
+        <UndoProvider>
+            <AppContent
+                initialSubscriptions={initialSubscriptions}
+                initialEmailAccounts={initialEmailAccounts}
+                initialPayments={initialPayments}
+                initialPriceChanges={initialPriceChanges}
+                initialConsolidationSuggestions={initialConsolidationSuggestions}
+            />
+        </UndoProvider>
+    );
+}
+
+function AppContent({
+    initialSubscriptions,
+    initialEmailAccounts,
+    initialPayments = [],
+    initialPriceChanges = [],
+    initialConsolidationSuggestions = [],
+}: {
+    initialSubscriptions: DBSubscription[];
+    initialEmailAccounts: any[];
+    initialPayments?: any[];
+    initialPriceChanges?: any[];
+    initialConsolidationSuggestions?: any[];
+}) {
     // Analytics state
     const [analyticsSummary, setAnalyticsSummary] = useState<AnalyticsSummary | undefined>(undefined);
 
@@ -92,6 +120,7 @@ export function AppClient({
     const [showManageSubscription, setShowManageSubscription] = useState(false);
     const [showInsights, setShowInsights] = useState(false);
     const [showEditSubscription, setShowEditSubscription] = useState(false);
+    const [showDeletedPanel, setShowDeletedPanel] = useState(false);
     const [isLoadingSubscriptions, setIsLoadingSubscriptions] = useState(true);
     const [currency, setCurrency] = useState<Currency>("USD");
     const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
@@ -109,6 +138,12 @@ export function AppClient({
     const { toasts, showToast, removeToast } = useToast();
     const { confirmDialog, showDialog, hideDialog } = useConfirmationDialog();
     const { shouldShowTour, completeTour, skipTour } = useOnboardingTourEnhanced();
+    const {
+        addDeletedSubscription,
+        restoreSubscription,
+        deletedSubscriptions,
+        clearDeletedSubscriptions,
+    } = useUndoContext();
 
     const {
         subscriptions,
@@ -140,7 +175,52 @@ export function AppClient({
         onToast: showToast,
         onUpgradePlan: () => setShowUpgradePlan(true),
         onShowDialog: showDialog,
+        onDeleteWithUndo: addDeletedSubscription,
     });
+
+    const handleRestoreSubscription = useCallback(async (id: number) => {
+        const restored = restoreSubscription(id);
+        if (restored) {
+            try {
+                await createSubscription({
+                    name: restored.name,
+                    category: restored.category,
+                    price: restored.price,
+                    icon: restored.icon || "🔗",
+                    renews_in: restored.renews_in || 30,
+                    status: restored.status,
+                    color: restored.color || "#000000",
+                    renewal_url: restored.renewal_url || null,
+                    tags: restored.tags || [],
+                    date_added: restored.date_added,
+                    email_account_id: restored.email_account_id,
+                    last_used_at: restored.last_used_at,
+                    has_api_key: restored.has_api_key,
+                    is_trial: restored.is_trial,
+                    trial_ends_at: restored.trial_ends_at,
+                    price_after_trial: restored.price_after_trial,
+                    source: restored.source || "manual",
+                    manually_edited: restored.manually_edited,
+                    edited_fields: restored.edited_fields || [],
+                    pricing_type: restored.pricing_type || "fixed",
+                    billing_cycle: restored.billing_cycle || "monthly",
+                });
+                const updatedSubs = [...subscriptions, { ...restored, id: Date.now() }];
+                updateSubscriptions(updatedSubs);
+                showToast({
+                    title: "Restored",
+                    description: `${restored.name} has been restored`,
+                    variant: "success",
+                });
+            } catch (error) {
+                showToast({
+                    title: "Error",
+                    description: "Failed to restore subscription",
+                    variant: "error",
+                });
+            }
+        }
+    }, [restoreSubscription, subscriptions, updateSubscriptions, showToast]);
 
     const {
         emailAccounts,
@@ -501,8 +581,9 @@ export function AppClient({
     }
 
     return (
-        <ErrorBoundary>
-            <AppLayout
+        <UndoProvider>
+            <ErrorBoundary>
+                <AppLayout
                 activeView={activeView}
                 onViewChange={setActiveView}
                 mode={mode}
@@ -515,6 +596,10 @@ export function AppClient({
                 unreadNotifications={unreadNotifications}
                 onNotificationsToggle={() =>
                     setShowNotifications(!showNotifications)
+                }
+                deletedCount={deletedSubscriptions.length}
+                onDeletedToggle={() =>
+                    setShowDeletedPanel(!showDeletedPanel)
                 }
                 onAddSubscription={() => setShowAddSubscription(true)}
                 budgetAlert={budgetAlert}
@@ -770,7 +855,17 @@ export function AppClient({
                     darkMode={darkMode}
                 />
             )}
-        </ErrorBoundary>
+
+            {/* Deleted Items Panel */}
+            {showDeletedPanel && (
+                <UndoPanel
+                    deletedSubscriptions={deletedSubscriptions}
+                    onRestore={handleRestoreSubscription}
+                    onClose={() => setShowDeletedPanel(false)}
+                    onClear={clearDeletedSubscriptions}
+                    darkMode={darkMode}
+                />
+            )}
+        </UndoProvider>
     );
 }
-
