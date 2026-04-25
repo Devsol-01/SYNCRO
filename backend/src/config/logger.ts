@@ -171,11 +171,64 @@ const requestContextFormat = winston.format((info: winston.Logform.Transformable
   return info;
 });
 
+/**
+ * Keys to be masked in logs.
+ */
+const SENSITIVE_KEYS = [
+  'password',
+  'secret',
+  'key',
+  'token',
+  'auth',
+  'pass',
+  'stellar_secret_key',
+  'soroban_secret',
+  'jwt_secret',
+  'stripe_secret_key',
+  'google_client_secret',
+  'microsoft_client_secret',
+];
+
+/**
+ * Custom Winston format to mask sensitive information.
+ */
+const maskFormat = winston.format((info) => {
+  const mask = (obj: any): any => {
+    if (obj === null || typeof obj !== 'object') {
+      return obj;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(mask);
+    }
+
+    const maskedObj: any = {};
+    for (const key in obj) {
+      const val = obj[key];
+      if (SENSITIVE_KEYS.some((sk) => key.toLowerCase().includes(sk))) {
+        maskedObj[key] = '***MASKED***';
+      } else if (typeof val === 'object' && val !== null) {
+        maskedObj[key] = mask(val);
+      } else {
+        maskedObj[key] = val;
+      }
+    }
+    return maskedObj;
+  };
+
+  const maskedInfo = mask(info);
+  
+  // Restore internal Winston properties that might have been lost or transformed
+  // (Winston uses symbols and some specific properties)
+  return { ...info, ...maskedInfo };
+});
+
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(
     requestContextFormat(),          // inject requestId / userId first
-    piiRedactionFormat(),           // redact sensitive data
+    maskFormat(),                    // mask secrets
+    piiRedactionFormat(),            // redact sensitive data
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
     winston.format.json()
