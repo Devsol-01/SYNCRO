@@ -58,13 +58,24 @@ export function Header({
                 >
                     {viewInfo.title}
                 </h2>
-                <p
-                    className={`text-sm ${
-                        darkMode ? "text-gray-400" : "text-gray-500"
-                    } mt-1`}
-                >
-                    {viewInfo.description}
-                </p>
+                <div className="flex items-center gap-2 mt-1">
+                    <p
+                        className={`text-sm ${
+                            darkMode ? "text-gray-400" : "text-gray-500"
+                        }`}
+                    >
+                        {viewInfo.description}
+                    </p>
+                    <span
+                        className={`text-xs px-2 py-1 rounded-md border ${
+                            darkMode
+                                ? "bg-[#2D3748] border-[#4A5568] text-gray-300"
+                                : "bg-gray-100 border-gray-300 text-gray-600"
+                        } opacity-70 hover:opacity-100 transition-opacity`}
+                    >
+                        Press <kbd className={`px-1 py-0.5 rounded text-xs font-mono border ${darkMode ? "bg-[#1E2A35] border-[#4A5568]" : "bg-white border-gray-400"}`}>Ctrl+K</kbd> to open command palette
+                    </span>
+                </div>
             </div>
             <div className="flex items-center gap-3">
                 <button

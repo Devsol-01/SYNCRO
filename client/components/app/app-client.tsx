@@ -529,6 +529,20 @@ export function AppClient({
                 onBulkCancel={handleBulkCancel}
                 onBulkDelete={handleBulkDelete}
                 isOffline={isOffline}
+                onNavigate={(path) => setActiveView(path.replace('/', ''))}
+                onCommandAction={(action) => {
+                    if (action === "new-subscription") {
+                        setShowAddSubscription(true);
+                    } else if (action === "search") {
+                        // Focus search input
+                        const searchInput = document.querySelector('input[type="search"]') as HTMLInputElement;
+                        searchInput?.focus();
+                    } else if (action === "toggle-theme") {
+                        setDarkMode(!darkMode);
+                    } else if (action === "sign-out") {
+                        auth.handleSignOut();
+                    }
+                }}
             >
                 {showInsightsPage ? (
                     <InsightsPage

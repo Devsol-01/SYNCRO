@@ -1,10 +1,13 @@
 "use client";
 
+import React from "react";
+
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { MobileMenuButton } from "./mobile-menu-button";
 import { BudgetAlert } from "./budget-alert";
 import { BulkActionsBar } from "./bulk-actions-bar";
+import { CommandPalette } from "@/components/command-palette";
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -36,6 +39,8 @@ interface AppLayoutProps {
     onBulkCancel: () => void;
     onBulkDelete: () => void;
     isOffline: boolean;
+    onNavigate?: (path: string) => void;
+    onCommandAction?: (action: string) => void;
 }
 
 export function AppLayout({
@@ -64,6 +69,8 @@ export function AppLayout({
     onBulkCancel,
     onBulkDelete,
     isOffline,
+    onNavigate,
+    onCommandAction,
 }: AppLayoutProps) {
     return (
         <div
@@ -131,6 +138,8 @@ export function AppLayout({
                     {children}
                 </div>
             </main>
+            
+            <CommandPalette onNavigate={onNavigate} onAction={onCommandAction} />
         </div>
     );
 }
